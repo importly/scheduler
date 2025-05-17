@@ -1,0 +1,5 @@
+credentials.json
+node_modules
+token.pickle
+__pycache__
+tasks.db
