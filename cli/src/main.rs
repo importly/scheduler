@@ -1,15 +1,16 @@
 // src/main.rs
 mod commands;
-use clap::Parser;
-use commands::{Category, Commands, SyncResult, Task, AutoScheduleResult, PushTaskResult, PushAllResult};
+use clap::{CommandFactory, Parser};
+use commands::{Category, Commands, SyncResult, Task, AutoScheduleResult, PushTaskResult, PushAllResult, Shell as CliShell};
 use reqwest;
 use serde_json::{json, Value};
 use std::fs;
+use clap_complete::generate;
 
 const API_URL: &str = "http://127.0.0.1:8000";
 
 #[derive(Parser)]
-#[command(name = "todo-cli", about = "CLI for scheduler")]
+#[command(name = "todo", about = "CLI for scheduler")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -18,8 +19,23 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let client = reqwest::Client::new();
 
+    // handle completions:
+    if let Commands::Completions { shell } = &cli.command {
+        // Convert our CmdShell enum into clap_complete::Shell
+        let mut app = Cli::command();
+        let generator = match shell {
+            CliShell::Bash        => clap_complete::Shell::Bash,
+            CliShell::Zsh         => clap_complete::Shell::Zsh,
+            CliShell::Fish        => clap_complete::Shell::Fish,
+            CliShell::PowerShell  => clap_complete::Shell::PowerShell,
+            CliShell::Elvish      => clap_complete::Shell::Elvish,
+        };
+        generate(generator, &mut app, "todo-cli", &mut std::io::stdout());
+        return Ok(());
+    }
+    
+    let client = reqwest::Client::new();
     match cli.command {
         Commands::ListCategories => {
             let resp = client.get(format!("{}/categories/", API_URL)).send().await?;
@@ -200,6 +216,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 result.updated.unwrap_or(0)
             );
         }
+        _ => unreachable!(), // we've already returned on Completions
     }
 
     Ok(())

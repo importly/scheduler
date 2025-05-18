@@ -1,5 +1,5 @@
 // src/commands.rs
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
 use serde::Deserialize;
 
 #[derive(Subcommand)]
@@ -91,6 +91,12 @@ pub enum Commands {
 
     /// Push all events and scheduled todos to Google Calendar
     PushAll,
+    /// Generate shell completion scripts
+    Completions {
+        /// The shell to generate the script for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }
 
 // Response types
@@ -131,3 +137,13 @@ pub struct PushAllResult {
     pub pushed: Option<u32>,
     pub updated: Option<u32>,
 }
+
+#[derive(ValueEnum, Clone)]
+pub enum Shell {
+    Bash,
+    Zsh,
+    Fish,
+    PowerShell,
+    Elvish,
+}
+
