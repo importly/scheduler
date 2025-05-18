@@ -9,6 +9,11 @@ from src.components import models, schemas, crud
 from src.components.calendar_sync import router as calendar_router  # Calendar sync endpoints
 from src.components.database import SessionLocal, engine
 
+from fastapi import BackgroundTasks
+from src.components import scheduler
+from src.components.schemas import AutoScheduleRequest
+from src.components.scheduler import AvailabilityConfig
+
 from fastapi.responses import ORJSONResponse
 
 load_dotenv()
@@ -87,23 +92,40 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
     return None
 
 
-if __name__ == "__main__":
-    import cProfile
-    import uvicorn
 
-    profiler = cProfile.Profile()
-    profiler.enable()
+@app.post("/auto-schedule/")
+def auto_schedule(
+    req: AutoScheduleRequest,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Auto-schedule all unscheduled TODOs following the given availability & weights.
+    Returns count of tasks scheduled in this run.
+    """
 
-    uvicorn.run(
-        "src.main:app",
-        host="0.0.0.0",
-        port=8000,
-        loop="asyncio",
-        http="httptools",
-        reload=False,
-        workers=1,
-    )
+    # Build the AvailabilityConfig
+    availability_map = {
+        wd: [(w.start, w.end) for w in windows]
+        for wd, windows in req.availability.items()
+    }
+    avail_cfg = AvailabilityConfig(availability_map)
 
-    profiler.disable()
-    profiler.dump_stats("profile.prof")
-    print("👉 Profile data written to profile.prof")
+    # Run in background so the HTTP client isn't blocked
+    def _run_scheduler():
+        before = db.query(models.Task).filter(
+            models.Task.type == models.TaskType.TODO,
+            models.Task.scheduled_for.is_(None)
+        ).count()
+        scheduler.slot_tasks(db, avail_cfg, req.weights)
+        after = db.query(models.Task).filter(
+            models.Task.type == models.TaskType.TODO,
+            models.Task.scheduled_for.is_(None)
+        ).count()
+        # you could persist a log, emit metrics, etc.
+        scheduled = before - after
+        return scheduled
+
+    background.add_task(_run_scheduler)
+
+    return {"status": "enqueued"}

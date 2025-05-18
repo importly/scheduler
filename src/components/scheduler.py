@@ -1,4 +1,4 @@
-#src/components/scheduler.py
+# src/components/scheduler.py
 from datetime import datetime, date, time, timedelta
 from typing import List, Tuple, Dict
 
@@ -38,36 +38,36 @@ class AvailabilityConfig:
 
 def find_busy_intervals(db: Session, target_date: date) -> List[timeInterval]:
     """
-    Query all 'event' tasks on target_date and return their occupied intervals.
+    Query all scheduled tasks (events + todos with start_time/end_time) on target_date and return their occupied intervals.
     """
     day_start = datetime.combine(target_date, time.min)
     day_end = datetime.combine(target_date, time.max)
-    events = (
+    tasks = (
         db.query(models.Task)
         .filter(
-            models.Task.type == models.TaskType.EVENT,
+            models.Task.start_time != None,
+            models.Task.end_time != None,
             models.Task.start_time < day_end,
             models.Task.end_time > day_start
         )
         .all()
     )
     intervals: List[timeInterval] = []
-    for ev in events:
-        start = max(ev.start_time, day_start)
-        end = min(ev.end_time, day_end)
+    for t in tasks:
+        start = max(t.start_time, day_start)
+        end = min(t.end_time, day_end)
         intervals.append((start, end))
     intervals.sort(key=lambda x: x[0])
     return intervals
 
 
 def find_free_slots(
-        avail_windows: List[timeInterval],
-        busy_intervals: List[timeInterval]
+    avail_windows: List[timeInterval],
+    busy_intervals: List[timeInterval]
 ) -> List[timeInterval]:
     """
     Subtract busy intervals from availability windows to get free slots.
     """
-    # Merge overlapping busy intervals
     merged: List[timeInterval] = []
     for interval in sorted(busy_intervals, key=lambda x: x[0]):
         if not merged:
@@ -81,7 +81,6 @@ def find_free_slots(
                 merged.append(interval)
 
     free_slots: List[timeInterval] = []
-    # Subtract merged busy from each availability window
     for window_start, window_end in avail_windows:
         cursor = window_start
         for busy_start, busy_end in merged:
@@ -100,14 +99,12 @@ def find_free_slots(
 
 
 def compute_priority_score(
-        task: models.Task,
-        now: datetime,
-        weights: Dict[str, float]
+    task: models.Task,
+    now: datetime,
+    weights: Dict[str, float]
 ) -> float:
     score = 0.0
-    # Priority factor
     score += (task.priority or 0) * weights.get('priority', 1.0)
-    # Deadline (inverse) factor
     if task.deadline:
         delta = task.deadline - now
         minutes = delta.total_seconds() / 60
@@ -115,7 +112,6 @@ def compute_priority_score(
             score += weights.get('deadline', 0.0) / minutes
         else:
             score += weights.get('deadline', 0.0) * 1000
-    # Additional factors
     for field, weight in weights.items():
         if field in ('priority', 'deadline'):
             continue
@@ -126,48 +122,69 @@ def compute_priority_score(
 
 
 def slot_tasks(
-        db: Session,
-        availability_config: AvailabilityConfig,
-        weights: Dict[str, float]
+    db: Session,
+    availability_config: AvailabilityConfig,
+    weights: Dict[str, float]
 ) -> None:
     """
-    Auto-schedule unscheduled 'todo' tasks indefinitely:
-      1. Fetch all TODO tasks without a scheduled_for date.
-      2. Rank by adjustable priority score.
-      3. Loop day by day, following weekly availability, until all tasks are scheduled.
+    Auto-schedule ALL TODO tasks on every run, rescheduling previously scheduled ones:
+      - Clear existing schedule from all TODOs.
+      - Sort by descending score.
+      - For each task, scan days from today, trim today's windows to future only.
+      - Recompute busy slots including newly scheduled todos.
+      - Place task into first fitting free slot, then commit and move to next.
     """
-    todos = db.query(models.Task).filter(
-        models.Task.type == models.TaskType.TODO,
-        models.Task.scheduled_for.is_(None)
-    ).all()
+    now = datetime.utcnow()
+    # Fetch all TODO tasks and clear previous scheduling
+    todos = (
+        db.query(models.Task)
+        .filter(models.Task.type == models.TaskType.TODO)
+        .all()
+    )
+    for task in todos:
+        task.scheduled_for = None
+        task.start_time = None
+        task.end_time = None
+        db.add(task)
+    db.commit()
+
     if not todos:
         return
-    now = datetime.utcnow()
-    scored = sorted(
+
+    pending = sorted(
         todos,
         key=lambda t: compute_priority_score(t, now, weights),
         reverse=True
     )
-    day_offset = 0
-    # Continue until all scored tasks are scheduled
-    while scored:
-        target_date = date.today() + timedelta(days=day_offset)
-        avail_windows = availability_config.get_windows_for_date(target_date)
-        if avail_windows:
+
+    for task in pending:
+        estimate = task.estimate or 0
+        scheduled = False
+        day_offset = 0
+
+        while not scheduled:
+            target_date = date.today() + timedelta(days=day_offset)
+            windows = availability_config.get_windows_for_date(target_date)
+            if day_offset == 0:
+                windows = [(max(s, now), e) for s, e in windows if e > now]
+
+            if not windows:
+                day_offset += 1
+                continue
+
             busy = find_busy_intervals(db, target_date)
-            free_slots = find_free_slots(avail_windows, busy)
+            free_slots = find_free_slots(windows, busy)
+
             for slot_start, slot_end in free_slots:
-                if not scored:
-                    break
-                task = scored[0]
-                estimate = task.estimate or 0
-                avail_min = (slot_end - slot_start).total_seconds() / 60
-                if avail_min >= estimate:
+                avail_minutes = (slot_end - slot_start).total_seconds() / 60
+                if avail_minutes >= estimate:
                     task.scheduled_for = target_date
                     task.start_time = slot_start
                     task.end_time = slot_start + timedelta(minutes=estimate)
                     db.add(task)
                     db.commit()
-                    scored.pop(0)
-        day_offset += 1
-    # End loop when all tasks scheduled
+                    scheduled = True
+                    break
+
+            day_offset += 1
+            # continue until placed

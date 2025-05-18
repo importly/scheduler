@@ -51,7 +51,7 @@ class Task(Base):
     end_time = Column(DateTime, nullable=True)
     duration = Column(Integer, nullable=True)  # in minutes
 
-    # Todo-specific fields
+    # kTodo-specific fields
     deadline = Column(DateTime, nullable=True)
     estimate = Column(Integer, nullable=True)  # in minutes
     scheduled_for = Column(Date, nullable=True)

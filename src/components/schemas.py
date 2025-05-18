@@ -1,6 +1,6 @@
 #src/components/schemas.py
-from datetime import datetime, date
-from typing import Optional, Any
+from datetime import datetime, date, time
+from typing import Optional, Any, Dict, List
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -113,3 +113,13 @@ class Task(TaskBase):
 
     class Config:
         from_attributes = True
+
+class AvailabilityWindow(BaseModel):
+    start: time
+    end:   time
+
+class AutoScheduleRequest(BaseModel):
+    # weekday 0=Mon … 6=Sun → list of availability windows
+    availability: Dict[int, List[AvailabilityWindow]]
+    # e.g. {"priority": 1.0, "deadline": 100.0, "estimate": 0.5}
+    weights:       Dict[str, float]
