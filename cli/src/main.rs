@@ -1,11 +1,14 @@
 // src/main.rs
 mod commands;
+mod date_parser;
+
 use clap::{CommandFactory, Parser};
 use commands::{Category, Commands, SyncResult, Task, AutoScheduleResult, PushTaskResult, PushAllResult, Shell as CliShell};
 use reqwest;
 use serde_json::{json, Value};
 use std::fs;
 use clap_complete::generate;
+use crate::date_parser::parse_deadline;
 
 const API_URL: &str = "http://127.0.0.1:8000";
 
@@ -31,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             CliShell::PowerShell  => clap_complete::Shell::PowerShell,
             CliShell::Elvish      => clap_complete::Shell::Elvish,
         };
-        generate(generator, &mut app, "todo-cli", &mut std::io::stdout());
+        generate(generator, &mut app, "todo", &mut std::io::stdout());
         return Ok(());
     }
     
@@ -92,11 +95,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::CreateTodo { title, estimate, deadline, priority, description } => {
+
+            let iso_deadline = parse_deadline(&deadline).map_err(|e| format!("Error parsing deadline `{}`: {}", deadline, e))?;
             let mut payload = serde_json::Map::new();
+            
+            println!("Parsed deadline: {}", iso_deadline);
+            
             payload.insert("title".into(), Value::String(title));
             payload.insert("type".into(), Value::String("todo".into()));
             payload.insert("estimate".into(), Value::Number(estimate.into()));
-            payload.insert("deadline".into(), Value::String(deadline));
+            payload.insert("deadline".into(), Value::String(iso_deadline));
             payload.insert("priority".into(), Value::Number(priority.into()));
             if let Some(desc) = description {
                 payload.insert("description".into(), Value::String(desc));

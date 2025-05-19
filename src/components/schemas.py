@@ -38,7 +38,7 @@ class TaskBase(BaseModel):
     end_time: Optional[datetime] = None
     duration: Optional[int] = Field(None, ge=0)
 
-    # Todo-specific fields
+    # kTodo-specific fields
     deadline: Optional[datetime] = None
     estimate: Optional[int] = Field(None, gt=0)
     scheduled_for: Optional[date] = None

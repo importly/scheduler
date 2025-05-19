@@ -1,105 +1,85 @@
-// src/commands.rs
 use clap::{Subcommand, ValueEnum};
 use serde::Deserialize;
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// List all categories
+    #[command(alias = "lc")]
     ListCategories,
 
-    /// Create a new category
+    #[command(alias = "cc")]
     CreateCategory {
-        /// Name of the category
         name: String,
-        /// Color in hex, e.g. #CCCCCC
         #[arg(short, long, default_value = "#CCCCCC")]
         color: String,
     },
 
-    /// List all tasks
+    #[command(alias = "lt")]
     ListTasks,
 
-    /// Create an event task
+    #[command(alias = "ce")]
     CreateEvent {
-        /// Title of the event
         title: String,
-        /// Start time (ISO datetime)
-        #[arg(long)]
+        #[arg(short = 's', long)]
         start: String,
-        /// End time (ISO datetime)
-        #[arg(long)]
+        #[arg(short = 'e', long)]
         end: String,
-        /// Description (optional)
-        #[arg(long)]
+        #[arg(short = 'd', long)]
         description: Option<String>,
     },
 
-    /// Create a todo task
+    #[command(alias = "ct")]
     CreateTodo {
-        /// Title of the todo
         title: String,
-        /// Estimate in minutes
-        #[arg(long)]
+        #[arg(short = 'e', long)]
         estimate: i32,
-        /// Deadline (ISO datetime)
-        #[arg(long)]
+        #[arg(short = 'd', long)]
         deadline: String,
-        /// Priority (default 0)
-        #[arg(long, default_value_t = 0)]
+        #[arg(short = 'p', long, default_value_t = 0)]
         priority: i32,
-        /// Description (optional)
-        #[arg(long)]
+        #[arg(short = 'D', long)]
         description: Option<String>,
     },
 
-    /// Update a task
+    #[command(alias = "ut")]
     UpdateTask {
-        /// ID of the task to update
         task_id: i32,
-        /// New status
-        #[arg(long)]
+        #[arg(short = 's', long)]
         status: Option<String>,
-        /// New title
-        #[arg(long)]
+        #[arg(short = 't', long)]
         title: Option<String>,
-        /// New priority
-        #[arg(long)]
+        #[arg(short = 'p', long)]
         priority: Option<i32>,
     },
 
-    /// Delete a task
+    #[command(alias = "dt")]
     DeleteTask {
-        /// ID of the task to delete
         task_id: i32,
     },
 
-    /// Sync calendar events into local DB
+    #[command(alias = "sc")]
     SyncCalendar,
 
-    /// Auto-schedule all unscheduled TODOs according to availability & weights
+    #[command(alias = "as")]
     AutoSchedule {
-        /// Optional path to JSON config file with `availability` and `weights`.
-        #[arg(long, value_name = "FILE")]
+        #[arg(short = 'c', long, value_name = "FILE")]
         config: Option<String>,
     },
 
-    /// Push a single task/event to Google Calendar
+    #[command(alias = "pt")]
     PushTask {
-        /// Local task ID to push
         task_id: i32,
     },
 
-    /// Push all events and scheduled todos to Google Calendar
+    #[command(alias = "pa")]
     PushAll,
-    /// Generate shell completion scripts
+
+    #[command(alias = "comp")]
     Completions {
-        /// The shell to generate the script for
         #[arg(value_enum)]
         shell: Shell,
     },
 }
 
-// Response types
 #[derive(Deserialize)]
 pub struct Category {
     pub id: i32,
@@ -146,4 +126,3 @@ pub enum Shell {
     PowerShell,
     Elvish,
 }
-
