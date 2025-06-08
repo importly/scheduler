@@ -7,3 +7,5 @@ google-auth-oauthlib~=1.2.1
 google-api-python-client~=2.169.0
 uliweb-alembic~=0.6.9
 python-dotenv~=1.1.0
+httpx~=0.27.0
+orjson~=3.10.1

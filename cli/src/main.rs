@@ -5,7 +5,7 @@ mod date_parser;
 use clap::{CommandFactory, Parser};
 use commands::{Category, Commands, SyncResult, Task, AutoScheduleResult, PushTaskResult, PushAllResult, Shell as CliShell};
 use prettytable::{Table, row};
-use chrono::{NaiveDateTime};
+use chrono::{NaiveDateTime, Local, Duration as ChronoDuration};
 use tokio::time::{sleep, Duration};
 use reqwest;
 use serde_json::{json, Value};
@@ -14,6 +14,46 @@ use clap_complete::generate;
 use crate::date_parser::parse_deadline;
 
 const API_URL: &str = "http://127.0.0.1:8000";
+
+fn humanize_datetime(s: &str) -> String {
+    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+        let now = Local::now().naive_local();
+        let date = dt.date();
+        let time_str = dt.format("%H:%M").to_string();
+        if date == now.date() {
+            return format!("today at {}", time_str);
+        }
+        if date == now.date() + ChronoDuration::days(1) {
+            return format!("tomorrow at {}", time_str);
+        }
+        if date == now.date() + ChronoDuration::days(2) {
+            return format!("day after tomorrow at {}", time_str);
+        }
+        if date <= now.date() + ChronoDuration::days(7) {
+            return format!("{} at {}", dt.format("%A"), time_str);
+        }
+        dt.format("%Y-%m-%d %H:%M").to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+fn format_minutes(mins: i32) -> String {
+    if mins <= 0 {
+        return "-".into();
+    }
+    let hours = mins / 60;
+    let minutes = mins % 60;
+    if hours > 0 {
+        if minutes > 0 {
+            format!("{}h {}m", hours, minutes)
+        } else {
+            format!("{}h", hours)
+        }
+    } else {
+        format!("{}m", minutes)
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "todo", about = "CLI for scheduler")]
@@ -111,13 +151,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
 
             let mut table = Table::new();
-            table.add_row(row!["ID","Task Name", "Due Date", "Priority", "Status", "Tags"]);
+            table.add_row(row!["ID","Task Name", "Due", "Est", "Priority", "Status", "Tags"]);
             for t in tasks {
-                let due_str = t.deadline
+                let due_raw = t.deadline
                     .as_ref()
                     .or(t.start_time.as_ref())
-                    .cloned()
-                    .unwrap_or_else(|| "-".to_string());
+                    .cloned();
+                let due_str = due_raw.as_deref().map(humanize_datetime).unwrap_or_else(|| "-".to_string());
+                let est_min = if t.kind == "event" {
+                    t.duration.unwrap_or(0)
+                } else {
+                    t.estimate.unwrap_or(0)
+                };
+                let est_str = format_minutes(est_min);
                 let prio = match t.priority.unwrap_or(0) {
                     p if p >= 7 => "High",
                     p if p >= 4 => "Medium",
@@ -126,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 let status = t.status.clone().unwrap_or_default();
                 let tag = t.category.as_ref().map(|c| c.name.clone()).unwrap_or_default();
-                table.add_row(row![t.id, t.title, due_str, prio, status, tag]);
+                table.add_row(row![t.id, t.title, due_str, est_str, prio, status, tag]);
             }
             table.printstd();
         }

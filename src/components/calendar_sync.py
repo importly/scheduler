@@ -1,12 +1,14 @@
 import os
 import pickle
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
+from typing import Tuple, Optional, List
 
 from src.components import models, crud
 
@@ -20,6 +22,36 @@ REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:8000/calendar/
 
 # Default timezone: Eastern Time
 DEFAULT_TIMEZONE = os.getenv('GOOGLE_CALENDAR_TIMEZONE', 'America/New_York')
+
+
+def build_description(task: models.Task) -> str:
+    """Embed task metadata as JSON in the event description."""
+    meta = {
+        "id": task.id,
+        "type": task.type.value,
+        "status": task.status.value,
+        "priority": task.priority,
+        "estimate": task.estimate,
+        "duration": task.duration,
+        "deadline": task.deadline.isoformat() if task.deadline else None,
+        "scheduled_for": task.scheduled_for.isoformat() if task.scheduled_for else None,
+    }
+    desc = task.description or ""
+    return f"{desc}\n\nTASK:{json.dumps(meta)}"
+
+
+def parse_description(desc: str) -> Tuple[str, Optional[dict]]:
+    """Split description and parse embedded metadata if present."""
+    if not desc:
+        return "", None
+    if "TASK:" not in desc:
+        return desc, None
+    user_desc, meta_part = desc.rsplit("TASK:", 1)
+    try:
+        meta = json.loads(meta_part.strip())
+    except Exception:
+        return desc, None
+    return user_desc.strip(), meta
 
 def get_db():
     from src.components.database import SessionLocal
@@ -85,39 +117,91 @@ def oauth2callback(code: str):
 
 @router.post("/sync")
 def sync_calendar(db: Session = Depends(get_db)):
-    """
-    Sync events from Google Calendar into the local DB.
-    """
+    """Two-way sync with Google Calendar."""
     creds = get_credentials()
     service = build('calendar', 'v3', credentials=creds)
-    now_iso = datetime.now(timezone.utc).isoformat()
-    events_result = service.events().list(
-        calendarId='primary',
-        timeMin=now_iso,
-        maxResults=2500,
-        singleEvents=True,
-        orderBy='startTime',
-        timeZone=DEFAULT_TIMEZONE
-    ).execute()
-    events = events_result.get('items', [])
+    now_iso = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+    events: List[dict] = []
+    page_token = None
+    while True:
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=now_iso,
+            maxResults=2500,
+            singleEvents=True,
+            orderBy='startTime',
+            timeZone=DEFAULT_TIMEZONE,
+            pageToken=page_token,
+        ).execute()
+        events.extend(events_result.get('items', []))
+        page_token = events_result.get('nextPageToken')
+        if not page_token:
+            break
+
+    ext_ids = {e['id'] for e in events if 'id' in e}
     imported = 0
+    deleted = 0
     for item in events:
         start_iso = item['start'].get('dateTime')
         end_iso = item['end'].get('dateTime')
         if not start_iso or not end_iso:
             continue
         title = item.get('summary', '')
-        description = item.get('description', '')
+        desc_raw = item.get('description', '')
+        user_desc, meta = parse_description(desc_raw)
+        start_dt = datetime.fromisoformat(start_iso)
+        end_dt = datetime.fromisoformat(end_iso)
+
+        if meta and meta.get('id'):
+            local = crud.get_task(db, int(meta['id']))
+            if local:
+                local.title = title
+                local.description = user_desc
+                local.start_time = start_dt
+                local.end_time = end_dt
+                local.duration = int((end_dt - start_dt).total_seconds() // 60)
+                if meta.get('deadline'):
+                    local.deadline = datetime.fromisoformat(meta['deadline'])
+                if meta.get('estimate') is not None:
+                    local.estimate = meta['estimate']
+                if meta.get('priority') is not None:
+                    local.priority = meta['priority']
+                if meta.get('status'):
+                    try:
+                        local.status = models.Status(meta['status'])
+                    except Exception:
+                        pass
+                if local.type == models.TaskType.TODO and (
+                    local.start_time != start_dt or local.end_time != end_dt
+                ):
+                    local.type = models.TaskType.EVENT
+                    local.estimate = None
+                    local.deadline = None
+                    local.scheduled_for = None
+                local.external_id = item['id']
+                db.add(local)
+                db.commit()
+                imported += 1
+                continue
+
         crud.create_or_update_event(
             db,
             title,
             start_iso,
             end_iso,
             external_id=item['id'],
-            description=description
+            description=desc_raw,
         )
         imported += 1
-    return {"imported": imported}
+
+    existing = db.query(models.Task).filter(models.Task.external_id != None).all()
+    for task in existing:
+        if task.external_id not in ext_ids:
+            crud.delete_task(db, task)
+            deleted += 1
+
+    return {"imported": imported, "deleted": deleted}
 
 
 @router.post("/push/{task_id}")
@@ -136,7 +220,7 @@ def push_task(task_id: int, db: Session = Depends(get_db)):
 
     event_body = {
         'summary':     task.title,
-        'description': task.description or '',
+        'description': build_description(task),
         'start': {
             'dateTime': task.start_time.isoformat(),
             'timeZone': DEFAULT_TIMEZONE,
@@ -186,7 +270,7 @@ def push_all(db: Session = Depends(get_db)):
 
         event_body = {
             'summary':     task.title,
-            'description': task.description or '',
+            'description': build_description(task),
             'start': {
                 'dateTime': task.start_time.isoformat(),
                 'timeZone': DEFAULT_TIMEZONE,
