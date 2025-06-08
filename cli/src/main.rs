@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
 
             let mut table = Table::new();
-            table.add_row(row!["Task Name", "Due Date", "Priority", "Status", "Tags"]);
+            table.add_row(row!["ID","Task Name", "Due Date", "Priority", "Status", "Tags"]);
             for t in tasks {
                 let due_str = t.deadline
                     .as_ref()
@@ -126,7 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 let status = t.status.clone().unwrap_or_default();
                 let tag = t.category.as_ref().map(|c| c.name.clone()).unwrap_or_default();
-                table.add_row(row![t.title, due_str, prio, status, tag]);
+                table.add_row(row![t.id, t.title, due_str, prio, status, tag]);
             }
             table.printstd();
         }
