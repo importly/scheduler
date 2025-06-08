@@ -112,3 +112,20 @@ def create_or_update_event(
         db.commit()
         db.refresh(new_event)
         return new_event
+
+
+def get_taskslist(db: Session, skip: int = 0, limit: int = 100):
+    from sqlalchemy import func
+
+    # Order by start_time if present, otherwise by deadline, then priority
+    return (
+        db.query(models.Task)
+        .order_by(
+            func.coalesce(models.Task.start_time, models.Task.deadline, models.Task.created_at),
+            models.Task.priority.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+

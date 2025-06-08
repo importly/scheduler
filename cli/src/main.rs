@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::ListTasks => {
-            let resp = client.get(format!("{}/tasks/", API_URL)).send().await?;
+            let resp = client.get(format!("{}/taskslist/", API_URL)).send().await?;
             resp.error_for_status_ref()?;
             let tasks: Vec<Task> = resp.json().await?;
             for t in tasks {
@@ -185,7 +185,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "3": [{ "start": "09:00", "end": "17:00" }],
                         "4": [{ "start": "09:00", "end": "17:00" }],
                         "5": [{ "start": "10:00", "end": "14:00" }],
-                        "6": []
+                        "6": [{ "start": "10:00", "end": "14:00" }]
                     },
                     "weights": { "priority": 1.0, "deadline": 100.0 }
                 })

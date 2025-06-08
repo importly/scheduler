@@ -66,6 +66,9 @@ def create_task(task: schemas.TaskCreate, db: Session = Depends(get_db)):
 def list_tasks(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     return crud.get_tasks(db, skip=skip, limit=limit)
 
+@app.get("/taskslist/", response_model=List[schemas.Task])
+def list_tasks_ordered(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    return crud.get_taskslist(db, skip=skip, limit=limit)
 
 @app.get("/tasks/{task_id}", response_model=schemas.Task)
 def get_task(task_id: int, db: Session = Depends(get_db)):
