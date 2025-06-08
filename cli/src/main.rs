@@ -4,6 +4,9 @@ mod date_parser;
 
 use clap::{CommandFactory, Parser};
 use commands::{Category, Commands, SyncResult, Task, AutoScheduleResult, PushTaskResult, PushAllResult, Shell as CliShell};
+use prettytable::{Table, row};
+use chrono::{NaiveDateTime};
+use tokio::time::{sleep, Duration};
 use reqwest;
 use serde_json::{json, Value};
 use std::fs;
@@ -61,19 +64,71 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::ListTasks => {
+            // Trigger auto-scheduling with default config before listing
+            let payload = json!({
+                "availability": {
+                    "0": [{ "start": "09:00", "end": "17:00" }],
+                    "1": [{ "start": "09:00", "end": "17:00" }],
+                    "2": [{ "start": "09:00", "end": "17:00" }],
+                    "3": [{ "start": "09:00", "end": "17:00" }],
+                    "4": [{ "start": "09:00", "end": "17:00" }],
+                    "5": [{ "start": "10:00", "end": "14:00" }],
+                    "6": [{ "start": "10:00", "end": "14:00" }]
+                },
+                "weights": { "priority": 1.0, "deadline": 100.0 }
+            });
+            let resp_sched = client.post(format!("{}/auto-schedule/", API_URL))
+                .json(&payload)
+                .send()
+                .await?;
+            resp_sched.error_for_status_ref()?;
+
+            // Wait briefly for background scheduler to complete
+            // Poll tasks until no TODOs remain unscheduled or timeout
+            for _ in 0..10 {
+                let resp = client.get(format!("{}/tasks/", API_URL)).send().await?;
+                resp.error_for_status_ref()?;
+                let tasks_check: Vec<Task> = resp.json().await?;
+                let pending = tasks_check
+                    .iter()
+                    .filter(|t| t.kind == "todo" && t.scheduled_for.is_none())
+                    .count();
+                if pending == 0 { break; }
+                sleep(Duration::from_millis(200)).await;
+            }
+
+            // Fetch ordered tasks
             let resp = client.get(format!("{}/taskslist/", API_URL)).send().await?;
             resp.error_for_status_ref()?;
-            let tasks: Vec<Task> = resp.json().await?;
+            let mut tasks: Vec<Task> = resp.json().await?;
+
+            // Sort by due date (start_time or deadline)
+            tasks.sort_by_key(|t| {
+                t.deadline
+                    .as_ref()
+                    .or(t.start_time.as_ref())
+                    .and_then(|d| NaiveDateTime::parse_from_str(d, "%Y-%m-%dT%H:%M:%S").ok())
+            });
+
+            let mut table = Table::new();
+            table.add_row(row!["Task Name", "Due Date", "Priority", "Status", "Tags"]);
             for t in tasks {
-                println!(
-                    "[{}] {} (type={}, status={}, priority={})",
-                    t.id,
-                    t.title,
-                    t.kind,
-                    t.status.unwrap_or_default(),
-                    t.priority.unwrap_or(0)
-                );
+                let due_str = t.deadline
+                    .as_ref()
+                    .or(t.start_time.as_ref())
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string());
+                let prio = match t.priority.unwrap_or(0) {
+                    p if p >= 7 => "High",
+                    p if p >= 4 => "Medium",
+                    p if p > 0  => "Low",
+                    _ => "Low",
+                };
+                let status = t.status.clone().unwrap_or_default();
+                let tag = t.category.as_ref().map(|c| c.name.clone()).unwrap_or_default();
+                table.add_row(row![t.title, due_str, prio, status, tag]);
             }
+            table.printstd();
         }
 
         Commands::CreateEvent { title, start, end, description } => {
