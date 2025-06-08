@@ -95,6 +95,10 @@ pub struct Task {
     pub kind: String,
     pub status: Option<String>,
     pub priority: Option<i32>,
+    pub deadline: Option<String>,
+    pub start_time: Option<String>,
+    pub scheduled_for: Option<String>,
+    pub category: Option<Category>,
 }
 
 #[derive(Deserialize)]

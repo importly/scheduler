@@ -15,3 +15,4 @@ tokio = { version = "1.0", features = ["full"] }
 clap_complete = "4.5.50"
 chrono = "0.4"
 regex = "1"
+prettytable-rs = "0.10"
